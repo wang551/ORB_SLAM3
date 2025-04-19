@@ -301,6 +301,9 @@ bool Atlas::isImuInitialized()
 
 void Atlas::PreSave()
 {
+    // 在开始前使用互斥锁保护地图集合
+    unique_lock<mutex> lock(mMutexAtlas);
+    
     if(mpCurrentMap){
         if(!mspMaps.empty() && mnLastInitKFidMap < mpCurrentMap->GetMaxKFid())
             mnLastInitKFidMap = mpCurrentMap->GetMaxKFid()+1; //The init KF is the next of current maximum
@@ -308,15 +311,32 @@ void Atlas::PreSave()
 
     struct compFunctor
     {
-        inline bool operator()(Map* elem1 ,Map* elem2)
+        inline bool operator()(Map* elem1, Map* elem2)
         {
             return elem1->GetId() < elem2->GetId();
         }
     };
-    std::copy(mspMaps.begin(), mspMaps.end(), std::back_inserter(mvpBackupMaps));
+    
+    // 创建有效地图的副本，避免直接操作 mspMaps
+    mvpBackupMaps.clear();
+    for(Map* pMap : mspMaps)
+    {
+        if(pMap && !pMap->IsBad())
+            mvpBackupMaps.push_back(pMap);
+    }
+    
+    // 对有效地图进行排序
     sort(mvpBackupMaps.begin(), mvpBackupMaps.end(), compFunctor());
 
-    std::set<GeometricCamera*> spCams(mvpCameras.begin(), mvpCameras.end());
+    // 收集所有相机
+    std::set<GeometricCamera*> spCams;
+    for(GeometricCamera* pCam : mvpCameras)
+    {
+        if(pCam)
+            spCams.insert(pCam);
+    }
+
+    // 对每个有效地图进行预保存处理
     for(Map* pMi : mvpBackupMaps)
     {
         if(!pMi || pMi->IsBad())
@@ -327,8 +347,12 @@ void Atlas::PreSave()
             SetMapBad(pMi);
             continue;
         }
+        
+        // 直接调用 Map::PreSave 方法，该方法会内部处理锁定
         pMi->PreSave(spCams);
     }
+    
+    // 清理已标记为坏的地图
     RemoveBadMaps();
 }
 
