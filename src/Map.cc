@@ -359,11 +359,21 @@ void Map::SetLastMapChange(int currentChangeId)
 void Map::PreSave(std::set<GeometricCamera*> &spCams)
 {
     int nMPWithoutObs = 0;
+    
+    // 首先创建一个有效地图点的临时集合
+    std::set<MapPoint*> validMapPoints;
     for(MapPoint* pMPi : mspMapPoints)
     {
         if(!pMPi || pMPi->isBad())
             continue;
-
+            
+        // 只添加有效的地图点到集合中
+        validMapPoints.insert(pMPi);
+    }
+    
+    // 使用有效的地图点集合
+    for(MapPoint* pMPi : validMapPoints)
+    {
         if(pMPi->GetObservations().size() == 0)
         {
             nMPWithoutObs++;
@@ -384,28 +394,31 @@ void Map::PreSave(std::set<GeometricCamera*> &spCams)
     mvBackupKeyFrameOriginsId.reserve(mvpKeyFrameOrigins.size());
     for(int i = 0, numEl = mvpKeyFrameOrigins.size(); i < numEl; ++i)
     {
-        mvBackupKeyFrameOriginsId.push_back(mvpKeyFrameOrigins[i]->mnId);
+        if(mvpKeyFrameOrigins[i])
+            mvBackupKeyFrameOriginsId.push_back(mvpKeyFrameOrigins[i]->mnId);
     }
-
 
     // Backup of MapPoints
     mvpBackupMapPoints.clear();
-    for(MapPoint* pMPi : mspMapPoints)
+    for(MapPoint* pMPi : validMapPoints)
     {
-        if(!pMPi || pMPi->isBad())
-            continue;
-
         mvpBackupMapPoints.push_back(pMPi);
         pMPi->PreSave(mspKeyFrames,mspMapPoints);
     }
 
     // Backup of KeyFrames
     mvpBackupKeyFrames.clear();
+    std::set<KeyFrame*> validKeyFrames;
     for(KeyFrame* pKFi : mspKeyFrames)
     {
         if(!pKFi || pKFi->isBad())
             continue;
-
+        
+        validKeyFrames.insert(pKFi);
+    }
+    
+    for(KeyFrame* pKFi : validKeyFrames)
+    {
         mvpBackupKeyFrames.push_back(pKFi);
         pKFi->PreSave(mspKeyFrames,mspMapPoints, spCams);
     }
@@ -421,7 +434,6 @@ void Map::PreSave(std::set<GeometricCamera*> &spCams)
     {
         mnBackupKFlowerID = mpKFlowerID->mnId;
     }
-
 }
 
 void Map::PostLoad(KeyFrameDatabase* pKFDB, ORBVocabulary* pORBVoc/*, map<long unsigned int, KeyFrame*>& mpKeyFrameId*/, map<unsigned int, GeometricCamera*> &mpCams)

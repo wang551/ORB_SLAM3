@@ -521,38 +521,38 @@ void System::Shutdown()
 
     cout << "Shutdown" << endl;
 
+    if(mpViewer)
+    {
+        cout << "Waiting for viewer thread to finish..." << endl;
+        mpViewer->RequestFinish();
+        // 等待一段时间，给Viewer线程时间来关闭窗口
+        usleep(10000);
+    }
+
     mpLocalMapper->RequestFinish();
     mpLoopCloser->RequestFinish();
-    /*if(mpViewer)
+    
+    // 先等待其他线程结束
+    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished())
     {
-        mpViewer->RequestFinish();
-        while(!mpViewer->isFinished())
-            usleep(5000);
-    }*/
+                    usleep(5000);
+    }
 
-    // Wait until all thread have effectively stopped
-    /*while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
-    {
-        if(!mpLocalMapper->isFinished())
-            cout << "mpLocalMapper is not finished" << endl;*/
-        /*if(!mpLoopCloser->isFinished())
-            cout << "mpLoopCloser is not finished" << endl;
-        if(mpLoopCloser->isRunningGBA()){
-            cout << "mpLoopCloser is running GBA" << endl;
-            cout << "break anyway..." << endl;
-            break;
-        }*/
-        /*usleep(5000);
-    }*/
-
+    // 如果启用了保存地图，确保保存完成
     if(!mStrSaveAtlasToFile.empty())
     {
         Verbose::PrintMess("Atlas saving to file " + mStrSaveAtlasToFile, Verbose::VERBOSITY_NORMAL);
         SaveAtlas(FileType::BINARY_FILE);
     }
 
-    /*if(mpViewer)
-        pangolin::BindToContext("ORB-SLAM2: Map Viewer");*/
+    // 确保Viewer线程已经退出或告诉它可以退出了
+    if(mpViewer)
+        {
+        while(!mpViewer->isFinished())
+        {
+            usleep(5000);
+        }
+    }
 
 #ifdef REGISTER_TIMES
     mpTracker->PrintTimeStats();
@@ -1403,7 +1403,10 @@ void System::InsertTrackTime(double& time)
 void System::SaveAtlas(int type){
     if(!mStrSaveAtlasToFile.empty())
     {
-        //clock_t start = clock();
+        // 确保在保存前完成所有操作
+        unique_lock<mutex> lock(mMutexReset);
+
+        cout << "Saving Atlas to file: " << mStrSaveAtlasToFile << endl;
 
         // Save the current session
         mpAtlas->PreSave();
@@ -1421,23 +1424,36 @@ void System::SaveAtlas(int type){
             cout << "Starting to write the save text file " << endl;
             std::remove(pathSaveFileName.c_str());
             std::ofstream ofs(pathSaveFileName, std::ios::binary);
-            boost::archive::text_oarchive oa(ofs);
-
-            oa << strVocabularyName;
-            oa << strVocabularyChecksum;
-            oa << mpAtlas;
-            cout << "End to write the save text file" << endl;
+            
+            try {
+                boost::archive::text_oarchive oa(ofs);
+                oa << strVocabularyName;
+                oa << strVocabularyChecksum;
+                oa << mpAtlas;
+                cout << "Atlas text file saved successfully" << endl;
+            } catch (const std::exception& e) {
+                cerr << "Error saving Atlas text file: " << e.what() << endl;
+            }
+            
+            ofs.close();
         }
         else if(type == BINARY_FILE) // File binary
         {
             cout << "Starting to write the save binary file" << endl;
             std::remove(pathSaveFileName.c_str());
             std::ofstream ofs(pathSaveFileName, std::ios::binary);
-            boost::archive::binary_oarchive oa(ofs);
-            oa << strVocabularyName;
-            oa << strVocabularyChecksum;
-            oa << mpAtlas;
-            cout << "End to write save binary file" << endl;
+            
+            try {
+                boost::archive::binary_oarchive oa(ofs);
+                oa << strVocabularyName;
+                oa << strVocabularyChecksum;
+                oa << mpAtlas;
+                cout << "Atlas binary file saved successfully" << endl;
+            } catch (const std::exception& e) {
+                cerr << "Error saving Atlas binary file: " << e.what() << endl;
+            }
+            
+            ofs.close();
         }
     }
 }
