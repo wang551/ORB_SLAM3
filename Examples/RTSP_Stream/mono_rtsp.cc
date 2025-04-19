@@ -51,6 +51,7 @@ struct FrameBuffer {
 // 全局变量
 queue<FrameBuffer> frameQueue;
 mutex queueMutex;
+mutex saveMutex;  // 添加保存点云数据时使用的互斥锁
 condition_variable frameCondition;
 bool isRunning = true;  // 控制程序运行
 int skipFrames = 0;  // 每处理一帧后跳过的帧数

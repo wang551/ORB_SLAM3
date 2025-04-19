@@ -278,9 +278,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/RTSP_Stream)
 add_executable(mono_rtsp
         Examples/RTSP_Stream/mono_rtsp.cc)
 target_link_libraries(mono_rtsp ${PROJECT_NAME})
-add_executable(test
-        Examples/RTSP_Stream/test.cc)
-target_link_libraries(test ${PROJECT_NAME})
 
 #Old examples
 
