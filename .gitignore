@@ -83,7 +83,10 @@ time*
 Time*
 Table_Euroc
 Table_TUMVI_rooms/
+*.mkv
+*.mp4
 *.pyc
+*.ply
 *.osa
 .idea/
 .vscode/

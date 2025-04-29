@@ -39,6 +39,7 @@
 #include "Viewer.h"
 #include "ImuTypes.h"
 #include "Settings.h"
+#include "PointCloudVisualizer.h"
 
 
 namespace ORB_SLAM3
@@ -79,6 +80,7 @@ class Tracking;
 class LocalMapping;
 class LoopClosing;
 class Settings;
+class PointCloudVisualizer;
 
 class System
 {
@@ -102,7 +104,7 @@ public:
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and Viewer threads.
-    System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor, const bool bUseViewer = true, const int initFr = 0, const string &strSequence = std::string());
+    System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor, const bool bUseViewer = true, const int initFr = 0, const string &strSequence = std::string(), const bool bReadOnly = false);
 
     // Proccess the given stereo frame. Images must be synchronized and rectified.
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
@@ -192,6 +194,29 @@ public:
     void InsertTrackTime(double& time);
 #endif
 
+    // 新增：点云处理相关函数
+    
+    // 生成并保存点云
+    void GeneratePointCloud();
+    
+    // 保存点云到PLY格式
+    bool SavePointCloudToPLY(const std::string &filename);
+    
+    // 保存点云到PCD格式
+    bool SavePointCloudToPCD(const std::string &filename);
+    
+    // 保存关键帧轨迹到PLY格式
+    bool SaveKeyFrameTrajectoryToPLY(const std::string &filename);
+    
+    // 从文件加载点云
+    bool LoadPointCloudFromPLY(const std::string &filename);
+    
+    // 获取点云可视化器
+    PointCloudVisualizer* GetPointCloudVisualizer() { return mpPointCloudVisualizer; }
+    
+    // 获取Atlas
+    Atlas* GetAtlas() { return mpAtlas; }
+
 private:
 
     void SaveAtlas(int type);
@@ -262,6 +287,12 @@ private:
     string mStrVocabularyFilePath;
 
     Settings* settings_;
+    
+    // 新增：点云可视化器
+    PointCloudVisualizer* mpPointCloudVisualizer;
+    
+    // 是否为只读模式（只加载地图，不启动线程）
+    bool mbReadOnly;
 };
 
 }// namespace ORB_SLAM
