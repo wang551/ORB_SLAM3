@@ -39,9 +39,9 @@ namespace ORB_SLAM3
 Verbose::eLevel Verbose::th = Verbose::VERBOSITY_NORMAL;
 
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
-               const bool bUseViewer, const int initFr, const string &strSequence):
+               const bool bUseViewer, const int initFr, const string &strSequence, const bool bReadOnly):
     mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false), mbResetActiveMap(false),
-    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false)
+    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false), mbReadOnly(bReadOnly)
 {
     // Output welcome message
     cout << endl <<
@@ -154,7 +154,24 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         // Load the file with an earlier session
         //clock_t start = clock();
         cout << "Initialization of Atlas from file: " << mStrLoadAtlasFromFile << endl;
-        bool isRead = LoadAtlas(FileType::BINARY_FILE);
+        
+        // 检查是否有设定的加载文件类型，默认使用二进制格式
+        int loadFileType = FileType::BINARY_FILE;
+        
+        // 兼容设置方式
+        cv::FileNode fileTypeNode = fsSettings["System.LoadFileType"];
+        if(!fileTypeNode.empty()) {
+            string fileTypeStr = (string)fileTypeNode;
+            if(fileTypeStr == "TEXT") {
+                loadFileType = FileType::TEXT_FILE;
+                cout << "Using TEXT file format for loading" << endl;
+            } else if(fileTypeStr == "BINARY") {
+                loadFileType = FileType::BINARY_FILE;
+                cout << "Using BINARY file format for loading" << endl;
+            }
+        }
+        
+        bool isRead = LoadAtlas(loadFileType);
 
         if(!isRead)
         {
@@ -185,57 +202,72 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mpFrameDrawer = new FrameDrawer(mpAtlas);
     mpMapDrawer = new MapDrawer(mpAtlas, strSettingsFile, settings_);
 
-    //Initialize the Tracking thread
-    //(it will live in the main thread of execution, the one that called this constructor)
-    cout << "Seq. Name: " << strSequence << endl;
-    mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
-                             mpAtlas, mpKeyFrameDatabase, strSettingsFile, mSensor, settings_, strSequence);
-
-    //Initialize the Local Mapping thread and launch
-    mpLocalMapper = new LocalMapping(this, mpAtlas, mSensor==MONOCULAR || mSensor==IMU_MONOCULAR,
-                                     mSensor==IMU_MONOCULAR || mSensor==IMU_STEREO || mSensor==IMU_RGBD, strSequence);
-    mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::Run,mpLocalMapper);
-    mpLocalMapper->mInitFr = initFr;
-    if(settings_)
-        mpLocalMapper->mThFarPoints = settings_->thFarPoints();
-    else
-        mpLocalMapper->mThFarPoints = fsSettings["thFarPoints"];
-    if(mpLocalMapper->mThFarPoints!=0)
+    // 如果是只读模式，则不初始化各种线程，只设置必要的组件用于点云可视化
+    if(mbReadOnly)
     {
-        cout << "Discard points further than " << mpLocalMapper->mThFarPoints << " m from current camera" << endl;
-        mpLocalMapper->mbFarPoints = true;
+        cout << "Running in read-only mode - no tracking, mapping or loop closing" << endl;
+        
+        // 初始化必要的组件，但不启动线程
+        mpLocalMapper = nullptr;
+        mpLoopCloser = nullptr;
+        mpTracker = nullptr;
+        mptLocalMapping = nullptr;
+        mptLoopClosing = nullptr;
     }
     else
-        mpLocalMapper->mbFarPoints = false;
-
-    //Initialize the Loop Closing thread and launch
-    // mSensor!=MONOCULAR && mSensor!=IMU_MONOCULAR
-    mpLoopCloser = new LoopClosing(mpAtlas, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR, activeLC); // mSensor!=MONOCULAR);
-    mptLoopClosing = new thread(&ORB_SLAM3::LoopClosing::Run, mpLoopCloser);
-
-    //Set pointers between threads
-    mpTracker->SetLocalMapper(mpLocalMapper);
-    mpTracker->SetLoopClosing(mpLoopCloser);
-
-    mpLocalMapper->SetTracker(mpTracker);
-    mpLocalMapper->SetLoopCloser(mpLoopCloser);
-
-    mpLoopCloser->SetTracker(mpTracker);
-    mpLoopCloser->SetLocalMapper(mpLocalMapper);
-
-    //usleep(10*1000*1000);
-
-    //Initialize the Viewer thread and launch
-    if(bUseViewer)
-    //if(false) // TODO
     {
-        mpViewer = new Viewer(this, mpFrameDrawer,mpMapDrawer,mpTracker,strSettingsFile,settings_);
-        mptViewer = new thread(&Viewer::Run, mpViewer);
-        mpTracker->SetViewer(mpViewer);
-        mpLoopCloser->mpViewer = mpViewer;
-        mpViewer->both = mpFrameDrawer->both;
+        //Initialize the Tracking thread
+        //(it will live in the main thread of execution, the one that called this constructor)
+        cout << "Seq. Name: " << strSequence << endl;
+        mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
+                                mpAtlas, mpKeyFrameDatabase, strSettingsFile, mSensor, settings_, strSequence);
+
+        //Initialize the Local Mapping thread and launch
+        mpLocalMapper = new LocalMapping(this, mpAtlas, mSensor==MONOCULAR || mSensor==IMU_MONOCULAR,
+                                        mSensor==IMU_MONOCULAR || mSensor==IMU_STEREO || mSensor==IMU_RGBD, strSequence);
+        mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::Run,mpLocalMapper);
+        mpLocalMapper->mInitFr = initFr;
+        if(settings_)
+            mpLocalMapper->mThFarPoints = settings_->thFarPoints();
+        else
+            mpLocalMapper->mThFarPoints = fsSettings["thFarPoints"];
+        if(mpLocalMapper->mThFarPoints!=0)
+        {
+            cout << "Discard points further than " << mpLocalMapper->mThFarPoints << " m from current camera" << endl;
+            mpLocalMapper->mbFarPoints = true;
+        }
+        else
+            mpLocalMapper->mbFarPoints = false;
+
+        //Initialize the Loop Closing thread and launch
+        // mSensor!=MONOCULAR && mSensor!=IMU_MONOCULAR
+        mpLoopCloser = new LoopClosing(mpAtlas, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR, activeLC); // mSensor!=MONOCULAR);
+        mptLoopClosing = new thread(&ORB_SLAM3::LoopClosing::Run, mpLoopCloser);
+
+        //Set pointers between threads
+        mpTracker->SetLocalMapper(mpLocalMapper);
+        mpTracker->SetLoopClosing(mpLoopCloser);
+
+        mpLocalMapper->SetTracker(mpTracker);
+        mpLocalMapper->SetLoopCloser(mpLoopCloser);
+
+        mpLoopCloser->SetTracker(mpTracker);
+        mpLoopCloser->SetLocalMapper(mpLocalMapper);
+
+        //Initialize the Viewer thread and launch
+        if(bUseViewer)
+        {
+            mpViewer = new Viewer(this, mpFrameDrawer,mpMapDrawer,mpTracker,strSettingsFile,settings_);
+            mptViewer = new thread(&Viewer::Run, mpViewer);
+            mpTracker->SetViewer(mpViewer);
+            mpLoopCloser->mpViewer = mpViewer;
+            mpViewer->both = mpFrameDrawer->both;
+        }
     }
 
+    // Initialize the Point Cloud Visualizer
+    mpPointCloudVisualizer = new PointCloudVisualizer(mpAtlas);
+    
     // Fix verbosity
     Verbose::SetTh(Verbose::VERBOSITY_QUIET);
 
@@ -529,13 +561,18 @@ void System::Shutdown()
         usleep(10000);
     }
 
-    mpLocalMapper->RequestFinish();
-    mpLoopCloser->RequestFinish();
+    // 只在非只读模式下或组件不为nullptr时请求结束
+    if(mpLocalMapper)
+        mpLocalMapper->RequestFinish();
+    if(mpLoopCloser)
+        mpLoopCloser->RequestFinish();
     
     // 先等待其他线程结束
-    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished())
+    // 等待非空的mapper和closer线程结束
+    while((mpLocalMapper && !mpLocalMapper->isFinished()) || 
+          (mpLoopCloser && !mpLoopCloser->isFinished()))
     {
-                    usleep(5000);
+        usleep(5000);
     }
 
     // 如果启用了保存地图，确保保存完成
@@ -1463,9 +1500,12 @@ bool System::LoadAtlas(int type)
     string strFileVoc, strVocChecksum;
     bool isRead = false;
 
-    string pathLoadFileName = "./";
-    pathLoadFileName = pathLoadFileName.append(mStrLoadAtlasFromFile);
-    pathLoadFileName = pathLoadFileName.append(".osa");
+    // Use the provided filename directly and avoid duplicating extension
+    string pathLoadFileName = mStrLoadAtlasFromFile;
+    // Append .osa extension only if missing
+    if(pathLoadFileName.size() < 4 || pathLoadFileName.substr(pathLoadFileName.size() - 4) != ".osa") {
+        pathLoadFileName += ".osa";
+    }
 
     if(type == TEXT_FILE) // File text
     {
@@ -1559,6 +1599,50 @@ string System::CalculateCheckSum(string filename, int type)
     }
 
     return checksum;
+}
+
+void System::GeneratePointCloud()
+{
+    if(mpPointCloudVisualizer)
+    {
+        mpPointCloudVisualizer->GeneratePointCloud();
+    }
+}
+
+bool System::SavePointCloudToPLY(const std::string &filename)
+{
+    if(mpPointCloudVisualizer)
+    {
+        return mpPointCloudVisualizer->SavePointCloudToPLY(filename);
+    }
+    return false;
+}
+
+bool System::SavePointCloudToPCD(const std::string &filename)
+{
+    if(mpPointCloudVisualizer)
+    {
+        return mpPointCloudVisualizer->SavePointCloudToPCD(filename);
+    }
+    return false;
+}
+
+bool System::SaveKeyFrameTrajectoryToPLY(const std::string &filename)
+{
+    if(mpPointCloudVisualizer)
+    {
+        return mpPointCloudVisualizer->SaveKeyFrameTrajectoryToPLY(filename);
+    }
+    return false;
+}
+
+bool System::LoadPointCloudFromPLY(const std::string &filename)
+{
+    if(mpPointCloudVisualizer)
+    {
+        return mpPointCloudVisualizer->LoadPointCloudFromPLY(filename);
+    }
+    return false;
 }
 
 } //namespace ORB_SLAM
